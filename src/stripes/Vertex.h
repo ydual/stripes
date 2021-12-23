@@ -14,6 +14,7 @@
 #include "Vector.h"
 #include "Types.h"
 #include <optional>
+#include <Eigen/Core>
 
 namespace DDG
 {
@@ -64,6 +65,10 @@ namespace DDG
          // for traversal
 
          Vector tangent;
+
+         //Gradient Information
+         std::vector<Eigen::MatrixXd> dAdX;
+         std::vector<Eigen::MatrixXd> dxdX;
    };
 }
 

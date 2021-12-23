@@ -5,8 +5,10 @@
 #include "MeshIO.h"
 #include "Utility.h"
 
+
 using namespace std;
 using namespace DDGConstants;
+using namespace Spectra;
 
 namespace DDG
 {
@@ -64,7 +66,7 @@ namespace DDG
 
    int Mesh::read( const string& filename )
    {
-      inputFilename = filename;
+      inputFilename = "../data/" + filename;
       ifstream in( filename.c_str() );
 
       if( !in.is_open() )
@@ -221,6 +223,8 @@ namespace DDG
          massMatrix( i, i ) = A;
          realMassMatrix( i*2+0, i*2+0 ) = A;
          realMassMatrix( i*2+1, i*2+1 ) = A;
+         // realMassMatrix( i*2+0, i*2+0 ) = 1.0;
+         // realMassMatrix( i*2+1, i*2+1 ) = 1.0;
       }
    }
 
@@ -403,6 +407,78 @@ namespace DDG
       fieldOffsetAngle = vertices.begin()->directionField.arg()/2.;
    }
 
+   enum class CSVState {
+      UnquotedField,
+      QuotedField,
+      QuotedQuote
+   };
+
+   std::vector<std::string> readCSVRow(const std::string &row) {
+      CSVState state = CSVState::UnquotedField;
+      std::vector<std::string> fields {""};
+      size_t i = 0; // index of the current field
+      for (char c : row) {
+         switch (state) {
+               case CSVState::UnquotedField:
+                  switch (c) {
+                     case ',': // end of field
+                                 fields.push_back(""); i++;
+                                 break;
+                     case '"': state = CSVState::QuotedField;
+                                 break;
+                     default:  fields[i].push_back(c);
+                                 break; }
+                  break;
+               case CSVState::QuotedField:
+                  switch (c) {
+                     case '"': state = CSVState::QuotedQuote;
+                                 break;
+                     default:  fields[i].push_back(c);
+                                 break; }
+                  break;
+               case CSVState::QuotedQuote:
+                  switch (c) {
+                     case ',': // , after closing quote
+                                 fields.push_back(""); i++;
+                                 state = CSVState::UnquotedField;
+                                 break;
+                     case '"': // "" -> "
+                                 fields[i].push_back('"');
+                                 state = CSVState::QuotedField;
+                                 break;
+                     default:  // end of quote
+                                 state = CSVState::UnquotedField;
+                                 break; }
+                  break;
+         }
+      }
+      return fields;
+   }
+
+   /// Read CSV file, Excel dialect. Accept "quoted fields ""with quotes"""
+   std::vector<std::vector<std::string>> readCSV(std::istream &in) {
+      std::vector<std::vector<std::string>> table;
+      std::string row;
+      while (!in.eof()) {
+         std::getline(in, row);
+         if (in.bad() || in.fail()) {
+               break;
+         }
+         auto fields = readCSVRow(row);
+         table.push_back(fields);
+      }
+      return table;
+   }
+
+   Eigen::Vector2d projectOntoPlane(const Eigen::Vector3d &vec,
+                                 const Eigen::Vector3d &normal,
+                                 const Eigen::Vector3d &axis)
+   {
+      Eigen::Vector3d eY = normal.cross(axis).normalized();
+      Eigen::Vector3d eX = eY.cross(normal).normalized();
+      return {eX.dot(vec), eY.dot(vec)};
+   }
+   
    void Mesh :: computeSmoothestSection( void )
    {
       cout << "Computing globally smoothest direction field..." << endl;
@@ -414,10 +490,38 @@ namespace DDG
       DenseMatrix<Complex> groundState( nV );
       smallestEigPositiveDefinite( energyMatrix, massMatrix, groundState );
 
-      for( VertexIter v = vertices.begin(); v != vertices.end(); v++ )
-      {
-         v->directionField = groundState( v->index );
+      
+      std::string csv_file = inputFilename.substr(0,inputFilename.find(".obj"));
+      csv_file+=".csv";
+      std::cout<<csv_file<<std::endl;
+
+      std::ifstream is(csv_file, std::ifstream::binary);
+      std::vector<std::vector<std::string>> table = readCSV(is);
+
+      // for(int i=0; i<table.size(); i++){
+      //    for(int j=0; j<table[i].size(); j++){
+      //       std::cout<<table[i][j]<<" ";
+      //    }
+      //    std::cout<<std::endl;
+      // }
+
+      for (VertexIter v = vertices.begin(); v != vertices.end(); v++) {
+         double alpha = (*v->he)->angularCoordinate;
+         Complex r(cos(2. * alpha), sin(2. * alpha));
+         auto n = v->normal();
+         auto e = (*v->he)->vector();
+         Eigen::Vector3d row_i(std::stod(table[v->index][0]),std::stod(table[v->index][1]),std::stod(table[v->index][2]));
+         auto u = projectOntoPlane(row_i.transpose(), {n.x, n.y, n.z}, {e.x, e.y, e.z});
+         double a = std::atan2(u.y(), u.x()) + M_PI / 2.0;
+         v->directionField = r * Complex(cos(2.0 * a), sin(2.0 * a));
       }
+
+
+      // for( VertexIter v = vertices.begin(); v != vertices.end(); v++ )
+      // {
+      //    Complex cur(std::stod(table[v->index][0]), std::stod(table[v->index][1]));
+      //    v->directionField = cur.unit();
+      // }
    }
 
    void Mesh :: computeCurvatureAlignedSection( void )
@@ -449,7 +553,6 @@ namespace DDG
 
    void Mesh :: parameterize( void )
    {
-      // compute the first coordinate
       computeParameterization( 0 );
 
       // at the user's request, we can also compute a second coordinate
@@ -631,6 +734,342 @@ namespace DDG
       A.shift( 1e-4 );
    }
 
+   void Mesh::energyGradient(SparseMatrix<Real>& A)
+   {
+      size_t nV = vertices.size();
+      for(int i=0; i<nV; ++i){
+         vertices[i].dAdX.resize(2);
+         vertices[i].dAdX[0].resize(2*nV,2*nV);
+         vertices[i].dAdX[0].setZero();
+         vertices[i].dAdX[1].resize(2*nV,2*nV);
+         vertices[i].dAdX[0].setZero();
+      }
+         
+
+      for( EdgeIter e = edges.begin(); e != edges.end(); e++ )
+      {
+         // get the endpoints
+         VertexIter vi = e->he->vertex;
+         VertexIter vj = e->he->flip->vertex;
+
+         // get the angle of the edge w.r.t. the endpoints' bases
+         double thetaI = e->he->angularCoordinate;
+         double thetaJ = e->he->flip->angularCoordinate + M_PI;
+
+         // compute the parallel transport coefficient from i to j
+         double dTheta = thetaJ - thetaI;
+         Complex rij( cos(dTheta), sin(dTheta) );
+
+         // compute the cotan weight
+         double cotAlpha = e->he->cotan();
+         double cotBeta  = e->he->flip->cotan();
+         if(       e->he->face->fieldIndex(2.) != 0 ) cotAlpha = 0.;
+         if( e->he->flip->face->fieldIndex(2.) != 0 ) cotBeta  = 0.;
+         double w = (cotAlpha+cotBeta)/2.;
+
+         // pick an arbitrary root at each endpoint
+         Complex Xi = vi->canonicalVector();
+         Complex Xj = vj->canonicalVector();
+
+         // check if the roots point the same direction
+         double s = dot( rij*Xi, Xj ) > 0. ? 1. : -1.;
+         if( fieldDegree == 1 ) s = 1.;
+         e->crossesSheets = ( s < 0. );
+
+         // compute the 1-form value along edge ij
+         double lij = e->length();
+         double phiI = (Xi).arg();
+         double phiJ = (s*Xj).arg();
+
+         double dphiIdia = - 0.5/(1+(vi->directionField.im/vi->directionField.re)*(vi->directionField.im/vi->directionField.re))*vi->directionField.im/(vi->directionField.re*vi->directionField.re);
+         double dphiIdib =  0.5/(1+(vi->directionField.im/vi->directionField.re)*(vi->directionField.im/vi->directionField.re))*1/(vi->directionField.re);
+         double dphiJdja = - 0.5/(1+(vj->directionField.im/vj->directionField.re)*(vj->directionField.im/vj->directionField.re))*vj->directionField.im/(vj->directionField.re*vj->directionField.re);
+         double dphiJdjb =  0.5/(1+(vj->directionField.im/vj->directionField.re)*(vj->directionField.im/vj->directionField.re))*1/(vj->directionField.re);
+
+
+
+
+         double omegaIJ = lambda * (lij/2.) * ( cos(phiI-thetaI) + cos(phiJ-thetaJ) );
+         double domegaIJdia = lambda * (lij/2.) *  -sin(phiI-thetaI) *  dphiIdia;
+         double domegaIJdib = lambda * (lij/2.) *  -sin(phiI-thetaI) *  dphiIdib;
+         double domegaIJdja = lambda * (lij/2.) *  -sin(phiJ-thetaJ) *  dphiJdja;
+         double domegaIJdjb = lambda * (lij/2.) *  -sin(phiJ-thetaJ) *  dphiJdjb;
+
+         e->omega = omegaIJ;
+
+         // compute the components of the new transport coefficient
+         double a = w * cos(omegaIJ);
+         double b = w * sin(omegaIJ);
+
+         int i = 2 * vi->index;
+         int j = 2 * vj->index;
+
+         // if(vi->index == 0 || vj->index == 0){
+         //    std::cout<<w<<" "<<omegaIJ<<" "<<dphiIdia<<" "<<dphiIdib<<std::endl;
+         // }
+
+
+         if( s > 0. )
+         {
+            // A(i+0,j+0) = -a; A(i+0,j+1) = -b;
+            // A(i+1,j+0) =  b; A(i+1,j+1) = -a;
+
+            // A(j+0,i+0) = -a; A(j+0,i+1) =  b;
+            // A(j+1,i+0) = -b; A(j+1,i+1) = -a;
+
+            vi->dAdX[0](i+0,j+0) = w * sin(omegaIJ) * domegaIJdia; vi->dAdX[1](i+0,j+0) = w * sin(omegaIJ) * domegaIJdib;
+            vi->dAdX[0](i+0,j+1) = -w * cos(omegaIJ) * domegaIJdia; vi->dAdX[1](i+0,j+1) = -w * cos(omegaIJ) * domegaIJdib;
+            vi->dAdX[0](i+1,j+0) = w * cos(omegaIJ) * domegaIJdia; vi->dAdX[1](i+1,j+0) = w * cos(omegaIJ) * domegaIJdib;
+            vi->dAdX[0](i+1,j+1) = w * sin(omegaIJ) * domegaIJdia; vi->dAdX[1](i+1,j+1) = w * sin(omegaIJ) * domegaIJdib;
+
+            vj->dAdX[0](i+0,j+0) = w * sin(omegaIJ) * domegaIJdja; vj->dAdX[1](i+0,j+0) = w * sin(omegaIJ) * domegaIJdjb;
+            vj->dAdX[0](i+0,j+1) = -w * cos(omegaIJ) * domegaIJdja; vj->dAdX[1](i+0,j+1) = -w * cos(omegaIJ) * domegaIJdjb;
+            vj->dAdX[0](i+1,j+0) = w * cos(omegaIJ) * domegaIJdja; vj->dAdX[1](i+1,j+0) = w * cos(omegaIJ) * domegaIJdjb;
+            vj->dAdX[0](i+1,j+1) = w * sin(omegaIJ) * domegaIJdja; vj->dAdX[1](i+1,j+1) = w * sin(omegaIJ) * domegaIJdjb;
+
+            vi->dAdX[0](j+0,i+0) = w * sin(omegaIJ) * domegaIJdia; vi->dAdX[1](j+0,i+0) = w * sin(omegaIJ) * domegaIJdib;
+            vi->dAdX[0](j+0,i+1) = w * cos(omegaIJ) * domegaIJdia; vi->dAdX[1](j+0,i+1) = w * cos(omegaIJ) * domegaIJdib;
+            vi->dAdX[0](j+1,i+0) = -w * cos(omegaIJ) * domegaIJdia; vi->dAdX[1](j+1,i+0) = -w * cos(omegaIJ) * domegaIJdib;
+            vi->dAdX[0](j+1,i+1) = w * sin(omegaIJ) * domegaIJdia; vi->dAdX[1](j+1,i+1) = w * sin(omegaIJ) * domegaIJdib;
+
+            vj->dAdX[0](j+0,i+0) = w * sin(omegaIJ) * domegaIJdja; vj->dAdX[1](j+0,i+0) = w * sin(omegaIJ) * domegaIJdjb;
+            vj->dAdX[0](j+0,i+1) = w * cos(omegaIJ) * domegaIJdja; vj->dAdX[1](j+0,i+1) = w * cos(omegaIJ) * domegaIJdjb;
+            vj->dAdX[0](j+1,i+0) = -w * cos(omegaIJ) * domegaIJdja; vj->dAdX[1](j+1,i+0) = -w * cos(omegaIJ) * domegaIJdjb;
+            vj->dAdX[0](j+1,i+1) = w * sin(omegaIJ) * domegaIJdja; vj->dAdX[1](j+1,i+1) = w * sin(omegaIJ) * domegaIJdjb;
+         }
+         else
+         {
+            // A(i+0,j+0) = -a; A(i+0,j+1) =  b;
+            // A(i+1,j+0) =  b; A(i+1,j+1) =  a;
+
+            // A(j+0,i+0) = -a; A(j+0,i+1) =  b;
+            // A(j+1,i+0) =  b; A(j+1,i+1) =  a;
+
+
+            vi->dAdX[0](i+0,j+0) = w * sin(omegaIJ) * domegaIJdia; vi->dAdX[1](i+0,j+0) = w * sin(omegaIJ) * domegaIJdib;
+            vi->dAdX[0](i+0,j+1) = w * cos(omegaIJ) * domegaIJdia; vi->dAdX[1](i+0,j+1) = w * cos(omegaIJ) * domegaIJdib;
+            vi->dAdX[0](i+1,j+0) = w * cos(omegaIJ) * domegaIJdia; vi->dAdX[1](i+1,j+0) = w * cos(omegaIJ) * domegaIJdib;
+            vi->dAdX[0](i+1,j+1) = -w * sin(omegaIJ) * domegaIJdia; vi->dAdX[1](i+1,j+1) = -w * sin(omegaIJ) * domegaIJdib;
+
+            vj->dAdX[0](i+0,j+0) = w * sin(omegaIJ) * domegaIJdja; vj->dAdX[1](i+0,j+0) = w * sin(omegaIJ) * domegaIJdjb;
+            vj->dAdX[0](i+0,j+1) = w * cos(omegaIJ) * domegaIJdja; vj->dAdX[1](i+0,j+1) = w * cos(omegaIJ) * domegaIJdjb;
+            vj->dAdX[0](i+1,j+0) = w * cos(omegaIJ) * domegaIJdja; vj->dAdX[1](i+1,j+0) = w * cos(omegaIJ) * domegaIJdjb;
+            vj->dAdX[0](i+1,j+1) = -w * sin(omegaIJ) * domegaIJdja; vj->dAdX[1](i+1,j+1) = -w * sin(omegaIJ) * domegaIJdjb;
+
+            vi->dAdX[0](j+0,i+0) = w * sin(omegaIJ) * domegaIJdia; vi->dAdX[1](j+0,i+0) = w * sin(omegaIJ) * domegaIJdib;
+            vi->dAdX[0](j+0,i+1) = w * cos(omegaIJ) * domegaIJdia; vi->dAdX[1](j+0,i+1) = w * cos(omegaIJ) * domegaIJdib;
+            vi->dAdX[0](j+1,i+0) = w * cos(omegaIJ) * domegaIJdia; vi->dAdX[1](j+1,i+0) = w * cos(omegaIJ) * domegaIJdib;
+            vi->dAdX[0](j+1,i+1) = -w * sin(omegaIJ) * domegaIJdia; vi->dAdX[1](j+1,i+1) = -w * sin(omegaIJ) * domegaIJdib;
+
+            vj->dAdX[0](j+0,i+0) = w * sin(omegaIJ) * domegaIJdja; vj->dAdX[1](j+0,i+0) = w * sin(omegaIJ) * domegaIJdjb;
+            vj->dAdX[0](j+0,i+1) = w * cos(omegaIJ) * domegaIJdja; vj->dAdX[1](j+0,i+1) = w * cos(omegaIJ) * domegaIJdjb;
+            vj->dAdX[0](j+1,i+0) = w * cos(omegaIJ) * domegaIJdja; vj->dAdX[1](j+1,i+0) = w * cos(omegaIJ) * domegaIJdjb;
+            vj->dAdX[0](j+1,i+1) = -w * sin(omegaIJ) * domegaIJdja; vj->dAdX[1](j+1,i+1) = -w * sin(omegaIJ) * domegaIJdjb;
+         }
+      }
+   }
+
+   void Mesh::checkenergyGradient(int coordinate)
+   {
+      SparseMatrix<Real> A;
+      buildEnergy( A, coordinate );
+      std::vector<SparseMatrix<Real>> dAdX;
+      energyGradient(A);
+      
+      
+      double eps = 1e-7;
+      for(int i=0; i<vertices.size(); ++i)
+      {
+         Complex Xi = vertices[i].canonicalVector();
+         double phiI = (Xi).arg();
+
+         vertices[i].directionField.re += eps;
+         SparseMatrix<Real> A_prime;
+         buildEnergy( A_prime, coordinate );
+         for(int j=0; j<2*vertices.size(); ++j){
+            for(int k=0; k<2*vertices.size(); ++k){
+               if(true){
+                  // std::cout<<i<<" "<<j<<" "<<k<<std::endl;
+                  // std::cout <<vertices[i].dAdX[0](j,k)<<" "<<(A_prime(j,k)-A(j,k))/eps<<" "<<vertices[i].dAdX[0](j,k)-(A_prime(j,k)-A(j,k))/eps<<std::endl;
+                  if(fabs(vertices[i].dAdX[0](j,k)-(A_prime(j,k)-A(j,k))/eps) >1e-4) std::cout<<i<<" "<<j<<" "<<k<<" "<<vertices[i].dAdX[0](j,k)<<" "<<(A_prime(j,k)-A(j,k))/eps<<std::endl;
+               }
+            }
+         }
+
+         vertices[i].directionField.re -= eps;
+
+
+         vertices[i].directionField.im += eps;
+         buildEnergy( A_prime, coordinate );
+         for(int j=0; j<2*vertices.size(); ++j){
+            for(int k=0; k<2*vertices.size(); ++k){
+               if((A_prime(j,k)-A(j,k))/eps != 0){
+                  // std::cout<<i<<" "<<j<<" "<<k<<std::endl;
+                  // std::cout <<vertices[i].dAdX[1](j,k)<<" "<<(A_prime(j,k)-A(j,k))/eps<<" "<<vertices[i].dAdX[1](j,k)-(A_prime(j,k)-A(j,k))/eps<<std::endl;
+                  if(vertices[i].dAdX[1](j,k)-(A_prime(j,k)-A(j,k))/eps >1e-4) std::cout<<i<<" "<<j<<" "<<k<<" "<<vertices[i].dAdX[1](j,k)<<" "<<(A_prime(j,k)-A(j,k))/eps<<std::endl;
+               }
+            }
+         }
+         vertices[i].directionField.im -= eps;
+      }
+   }
+
+   void Mesh::parameterizatioGradient(SparseMatrix<Real>& A, Eigen::MatrixXd& groundState, double l, Eigen::SparseMatrix<double>& H)
+   {
+      size_t nV = vertices.size();
+
+      Eigen::MatrixXd RA(2*nV,2*nV);
+      Eigen::MatrixXd C(2*nV+1,2*nV+1);
+      Eigen::MatrixXd B(2*nV,2*nV);
+      Eigen::VectorXd x(2*nV);
+      double alpha  = 0;
+      for(int i=0; i<2*nV; ++i){
+         for(int j=0; j<2*nV; ++j){
+            RA(i,j) = A(i,j);
+            C(i,j) = A(i,j) - l*realMassMatrix(i,j);
+            B(i,j) = realMassMatrix(i,j);
+         }
+      }
+
+
+      Eigen::MatrixXd Bx = B*groundState;
+      for(int i=0; i<2*nV; ++i){
+         C(2*nV,i) = -Bx(i);
+         C(i,2*nV) = -Bx(i);
+      }
+
+
+      Eigen::MatrixXd NC(4*nV+1, 4*nV+1);
+      NC.setZero();
+      for(int i=0; i<2*nV+1; ++i)
+         NC(i,i) = 1;
+      for(int i=2*nV+1; i<4*nV+1; ++i)
+         NC(i,i) = alpha;
+      for(int i=0; i<2*nV; ++i){
+         for(int j=0; j<2*nV; ++j){
+            NC(i,j+2*nV+1) = (-l*realMassMatrix(i,j)+A(i,j));
+            NC(j+2*nV+1, i) = (-l*realMassMatrix(i,j)+A(i,j));
+         }
+      }
+      for(int i=0; i<2*nV; ++i){
+         NC(2*nV,i+2*nV+1) = Bx(i);
+         NC(i+2*nV+1,2*nV) = Bx(i);
+      }
+
+      // Eigen::SparseMatrix<double> CS(2*nV+1, 2*nV+1);
+      // CS.reserve(Eigen::VectorXi::Constant(2*nV+1,6));
+      // for(int i=0; i<=2*nV; ++i){
+      //    for(int j=0; j<=2*nV; ++j){
+      //       // if(fabs(C(i,j)) > 1e-6)
+      //          CS.insert(i,j) = C(i,j);
+      //    }
+      // }
+      // CS.makeCompressed();
+
+
+      Eigen::SparseMatrix<double> NCS(4*nV+1, 4*nV+1);
+      NCS.reserve(Eigen::VectorXi::Constant(4*nV+1,6));
+      for(int i=0; i<4*nV+1; ++i){
+         for(int j=0; j<4*nV+1; ++j){
+            // if(fabs(C(i,j)) > 1e-6)
+               NCS.insert(i,j) = NC(i,j);
+         }
+      }
+      NCS.makeCompressed();
+      H = NCS;
+      
+
+      // Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> solverLDLT;
+      // solverLDLT.compute(CS);
+      // solverLDLT.analyzePattern(CS);
+
+      Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> solverLDLT2;
+      solverLDLT2.compute(NCS);
+      solverLDLT2.analyzePattern(NCS);
+
+      // int np = 0;
+      // int nn = 0;
+      // int nz = 0;
+
+      // double EPS_ZERO = 1e-6;
+      // double EPS_ZERO_PSD = 1e-6;
+      // for(int i=0; i<solverLDLT.vectorD().size(); i++){
+      //    double di = solverLDLT.vectorD()(i);
+      //    if(di<EPS_ZERO_PSD) nn++;
+      //    else if(fabs(di)<EPS_ZERO_PSD) nz++;
+      //    else np++;
+      // }
+
+      // std::cout<<"nn: "<<nn<<std::endl;
+      // std::cout<<"nz: "<<nz<<std::endl;
+      // std::cout<<"np: "<<np<<std::endl;
+
+
+
+      for(int i=0; i<nV; ++i){
+         vertices[i].dxdX.resize(2);
+         vertices[i].dxdX[0].resize(4*nV+1,1);
+         vertices[i].dxdX[1].resize(4*nV+1,1);
+
+         
+         Eigen::VectorXd bl(4*nV+1),blp(4*nV+1);
+         Eigen::VectorXd bl1(2*nV);
+         for(int j=0; j<2*nV; ++j) bl1[j] = 0.0;
+         bl << bl1, 0,-(vertices[i].dAdX[0]*groundState);
+         vertices[i].dxdX[0] =  solverLDLT2.solve(bl);
+         blp << bl1, 0,-(vertices[i].dAdX[1]*groundState);
+         vertices[i].dxdX[1] =  solverLDLT2.solve(blp);
+      }
+   }
+
+   double Mesh::computeSmallestEigenValueMe(SparseMatrix<Real>& A, Eigen::MatrixXd& groundState, int index)
+   {
+      int nV = vertices.size();
+
+      Eigen::SparseMatrix<double> RA(2*nV, 2*nV);
+      Eigen::SparseMatrix<double> B(2*nV, 2*nV);
+      RA.reserve(Eigen::VectorXi::Constant(2*nV,6));
+      B.reserve(Eigen::VectorXi::Constant(2*nV,6));
+
+      for(int i=0; i<2*nV; ++i){
+         for(int j=0; j<2*nV; ++j){
+            if(A(i,j) != 0)
+               RA.insert(i,j) = A(i,j);
+            if(realMassMatrix(i,j)!= 0)
+               B.insert(i,j) = realMassMatrix(i,j);
+         }
+      }
+      RA.makeCompressed();
+      B.makeCompressed();
+
+      //Eigen::MatrixXd D = B.inverse()*RA;
+
+
+      // Construct matrix operation object using the wrapper class
+      SymShiftInvert<double, Eigen::Sparse, Eigen::Sparse> op1(RA,B);
+      SparseGenMatProd<double> op2(B);
+   
+      // Construct eigen solver object, requesting the largest
+      // (in magnitude, or norm) three eigenvalues
+      double sigma = 1e-5;
+      SymGEigsShiftSolver<SymShiftInvert<double, Eigen::Sparse, Eigen::Sparse>,SparseGenMatProd<double>,GEigsMode::ShiftInvert> eigs(op1, op2, index, min(index+20,2*nV), sigma);
+   
+      // Initialize and compute
+      eigs.init();
+      int nconv = eigs.compute(SortRule::LargestMagn);
+
+      auto evecs = eigs.eigenvectors().col(0);
+      double evalues = eigs.eigenvalues()(0);
+      std::cout<<eigs.eigenvalues()<<std::endl;
+
+      //std::cout<<"fuck"<<std::endl;
+      //std::cout<<RA*eigs.eigenvectors().col(0)-eigs.eigenvalues()(0)*B*evecs<<std::endl;
+
+      groundState = evecs;
+      return evalues;
+
+   }
+
    void Mesh :: computeParameterization( int coordinate )
    {
       cerr << "Computing stripe pattern..." << endl;
@@ -640,11 +1079,155 @@ namespace DDG
 
       SparseMatrix<Real> A;
       buildEnergy( A, coordinate );
+      energyGradient(A);
+      checkenergyGradient(coordinate);
+      
 
       size_t nV = vertices.size();
-      DenseMatrix<Real> groundState( 2*nV );
-      smallestEigPositiveDefinite( A, realMassMatrix, groundState );
+      int nEigs = 9;
+      double l;
+      std::vector<double> D;
+      std::vector<DenseMatrix<Real>> V;
 
+   
+      DenseMatrix<Real> groundState(2*nV);
+      Eigen::MatrixXd gs;
+      //smallestEigPositiveDefinite( A, realMassMatrix, groundState );
+      nSmallestEigsPositiveDefinite(A,realMassMatrix,V,D,nEigs);
+      l = D[0];
+      groundState = V[0];
+
+      Eigen::MatrixXd gs1(2*nV,1);
+      for(int i=0; i<2*nV; ++i)
+         gs1(i) = groundState(i);
+
+      Eigen::SparseMatrix<double> H(4*nV+1, 4*nV+1);
+      parameterizatioGradient(A,gs1,D[0], H);
+
+      
+
+      double eps = 1e-5;
+      for(int iter=0; iter<nV; ++iter){
+         vertices[iter].directionField.re += eps;
+
+         SparseMatrix<Real> A_prime;
+         buildEnergy( A_prime, coordinate );
+
+         Eigen::MatrixXd B(2*nV,2*nV);
+         Eigen::MatrixXd dA(2*nV,2*nV);
+         Eigen::MatrixXd A_p(2*nV,2*nV);
+            
+
+         for(int i=0; i<2*nV; ++i)
+            for(int j=0; j<2*nV; ++j){
+               A_p(i,j) = A_prime(i,j);
+               dA(i,j) = A_prime(i,j)-A(i,j);
+               B(i,j) = realMassMatrix(i,j);
+            }
+
+         Eigen::MatrixXd Bx = B*gs1;
+
+         Eigen::MatrixXd NC(4*nV+1, 4*nV+1);
+         NC.setZero();
+         for(int i=0; i<2*nV+1; ++i)
+            NC(i,i) = 1;
+         for(int i=2*nV+1; i<4*nV+1; ++i)
+            NC(i,i) = 0;
+         for(int i=0; i<2*nV; ++i){
+            for(int j=0; j<2*nV; ++j){
+               NC(i,j+2*nV+1) = (-l*realMassMatrix(i,j)+A(i,j));
+               NC(j+2*nV+1, i) = (-l*realMassMatrix(i,j)+A(i,j));
+            }
+         }
+         for(int i=0; i<2*nV; ++i){
+            NC(2*nV,i+2*nV+1) = Bx(i);
+            NC(i+2*nV+1,2*nV) = Bx(i);
+         }
+
+         std::cout<<std::endl;
+
+         Eigen::SparseMatrix<double> NCS(4*nV+1, 4*nV+1);
+         NCS.reserve(Eigen::VectorXi::Constant(4*nV+1,6));
+         for(int i=0; i<4*nV+1; ++i){
+            for(int j=0; j<4*nV+1; ++j){
+               // if(fabs(C(i,j)) > 1e-6)
+                  NCS.insert(i,j) = NC(i,j);
+            }
+         }
+         NCS.makeCompressed();
+
+               
+         Eigen::VectorXd bl1(2*nV), bl3(2*nV), bl4(2*nV);
+         for(int j=0; j<2*nV; ++j) bl1[j] = 0.0;
+         bl3 = dA*gs1;
+         bl4 = vertices[iter].dAdX[0]*gs1*eps;
+
+
+         Eigen::VectorXd bl(4*nV+1);
+         bl << -bl1, 0,-bl3;
+         Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> solverLDLT2;
+         solverLDLT2.compute(NCS);
+         solverLDLT2.analyzePattern(NCS);
+         Eigen::VectorXd dxdXs_n = solverLDLT2.solve(bl);
+
+         vertices[iter].directionField.re -= 2*eps;
+
+         buildEnergy( A_prime, coordinate );
+
+         for(int i=0; i<2*nV; ++i)
+            for(int j=0; j<2*nV; ++j){
+               A_p(i,j) = A_prime(i,j);
+               dA(i,j) = A_prime(i,j)-A(i,j);
+               B(i,j) = realMassMatrix(i,j);
+            }
+
+         NC.setZero();
+         for(int i=0; i<2*nV+1; ++i)
+            NC(i,i) = 1;
+         for(int i=2*nV+1; i<4*nV+1; ++i)
+            NC(i,i) = 0;
+         for(int i=0; i<2*nV; ++i){
+            for(int j=0; j<2*nV; ++j){
+               NC(i,j+2*nV+1) = (-l*realMassMatrix(i,j)+A(i,j));
+               NC(j+2*nV+1, i) = (-l*realMassMatrix(i,j)+A(i,j));
+            }
+         }
+         for(int i=0; i<2*nV; ++i){
+            NC(2*nV,i+2*nV+1) = Bx(i);
+            NC(i+2*nV+1,2*nV) = Bx(i);
+         }
+
+         Eigen::SparseMatrix<double> NCSp(4*nV+1, 4*nV+1);
+         NCSp.reserve(Eigen::VectorXi::Constant(4*nV+1,4*nV+1));
+         for(int i=0; i<4*nV+1; ++i){
+            for(int j=0; j<4*nV+1; ++j){
+               // if(fabs(C(i,j)) > 1e-6)
+                  NCSp.insert(i,j) = NC(i,j);
+            }
+         }
+         NCSp.makeCompressed();
+
+         bl3 = (A_p-l*B)*gs1;
+         Eigen::VectorXd blp(4*nV+1);
+         blp << -bl1, 0,-bl3;
+         Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> solverLDLT2p;
+         solverLDLT2p.compute(NCSp);
+         solverLDLT2p.analyzePattern(NCSp);
+
+         Eigen::VectorXd dxdXs_np = solverLDLT2p.solve(blp);
+
+
+         for(int j=0; j<2*nV; ++j){
+            double dxdX_a = vertices[iter].dxdX[0](j);
+            double dxdX_n = (dxdXs_n[j]-dxdXs_np[j])/(2*eps);
+            if(dxdX_a != 0)
+               std::cout<<iter<<" "<<j<<" analytical: "<<dxdX_a<<" numerical: "<<dxdX_n<<" diff: "<<(dxdX_n-dxdX_a)/dxdX_a<<std::endl;
+         }
+
+         vertices[iter].directionField.re += eps;
+      }
+
+      
       for( VertexIter v = vertices.begin(); v != vertices.end(); v++ )
       {
          int i = v->index;
@@ -652,7 +1235,11 @@ namespace DDG
                                         groundState( i*2+1 ) ).unit();
       }
 
+      
       assignTextureCoordinates( coordinate );
+
+            
+
    }
 
    double Mesh :: energy( const SparseMatrix<Real>& A, const DenseMatrix<Real>& x, double eps )

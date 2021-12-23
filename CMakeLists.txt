@@ -13,6 +13,8 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 include(UseColors)
 include(Warnings)
 
+include_directories("usr/include/eigen3")
+
 ################################################################################
 
 # Stripe library
@@ -101,8 +103,8 @@ find_package(Eigen3 QUIET NO_MODULE)
 if(TARGET Eigen3::Eigen)
 	# Libigl-style wrapper using Eigen types
 	add_library(stripes_wrapper
-		src/stripes/wrapper/Stripes.cpp
-		src/stripes/wrapper/Stripes.h
+		src/wrapper/Stripes.cpp
+		src/wrapper/Stripes.h
 	)
 	add_library(stripes::wrapper ALIAS stripes_wrapper)
 
@@ -123,6 +125,7 @@ if(STRIPES_TOPLEVEL_PROJECT)
 
 	find_package(OpenGL)
 	find_package(GLUT)
+	find_package(LIBIGL REQUIRED)
 	if(NOT (OPENGL_GLU_FOUND AND GLUT_FOUND))
 		message(WARNING "OpenGL or GLUT could not be found. The viewer will not be built.")
 		return()
@@ -139,13 +142,25 @@ if(STRIPES_TOPLEVEL_PROJECT)
 		src/viewer/Viewer.h
 	)
 
+	add_executable(Test
+		src/wrapper/main.cpp
+		src/wrapper/Stripes.cpp
+		src/wrapper/Stripes.h
+	)
+
 	# Dependencies
 	add_subdirectory(ext/glad)
+	add_subdirectory(ext/spectra)
 	target_link_libraries(StripePatterns
 		PUBLIC
 			stripes::stripes
 			GLUT::GLUT
 			glad::glad
 			OpenGL::GLU
+	)
+	target_link_libraries(Test
+		PUBLIC
+			stripes::stripes
+			igl::core
 	)
 endif()

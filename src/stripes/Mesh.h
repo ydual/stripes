@@ -52,6 +52,11 @@
 #include "DenseMatrix.h"
 #include "SparseMatrix.h"
 #include "Complex.h"
+#include <eigen3/Eigen/Dense>
+#include <Spectra/GenEigsSolver.h>
+#include <Spectra/SymGEigsShiftSolver.h>
+#include <Spectra/MatOp/SparseGenMatProd.h>
+#include <Eigen/SparseCholesky>
 
 namespace DDG
 {
@@ -102,6 +107,11 @@ namespace DDG
          void parameterize( void );
          void buildEnergy( SparseMatrix<Real>& A, int coordinate );
          void buildDirichletEnergy( SparseMatrix<Real>& A );
+         void energyGradient(SparseMatrix<Real>& A);
+         void checkenergyGradient(int coordinate);
+         void parameterizatioGradient(SparseMatrix<Real>& A, Eigen::MatrixXd& groundState, double l, Eigen::SparseMatrix<double>& H);
+         void checkparameterizatioGradient(void);
+         double computeSmallestEigenValueMe(SparseMatrix<Real>& A, Eigen::MatrixXd& groundState, int index);
 
          double energy( const SparseMatrix<Real>& A,
                         const DenseMatrix<Real>& x,
