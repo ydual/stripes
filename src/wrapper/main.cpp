@@ -22,7 +22,7 @@ int main(void) {
     double theta = 0;
     double frequency = 130.;
     int numCoordinateFunctions = 1;
-    igl::readOBJ("../data/square10.obj",V,F);
+    igl::readOBJ("../data/square50.obj",V,F);
 
     srand(20);
 
@@ -60,32 +60,32 @@ int main(void) {
     param_pp.setZero();
     v_tar.setZero();
 
-    //for(int i=0; i<3; ++i)
+    for(int i=0; i<3; ++i)
         DDG::computeStripePatterns(1,v_tar,dpdD,param_cur,V,F,D_cur,theta,frequency,numCoordinateFunctions,branchIndex,parameterization,zeroIndex,isBorder);
     //DDG::computeStripePatterns(0,v_tar,dpdD,param_cur,V,F,D_cur,theta,frequency,numCoordinateFunctions,branchIndex,parameterization,zeroIndex,isBorder);
     //std::cout<<dpdD[0].rows()<<std::endl;
 
-    // double eps = 1e-5;
-    // for(int i=0; i<D_cur.rows(); ++i)
-    // {
-    //     D_cur(i,1) += eps;
-    //     for(int j=0; j<3; ++j)
-    //         DDG::computeStripePatterns(0,v_tar,dummy,param_p,V,F,D_cur,theta,frequency,numCoordinateFunctions,branchIndex,parameterization,zeroIndex,isBorder);
-    //     D_cur(i,1) -= 2*eps;
-    //     for(int j=0; j<3; ++j)
-    //         DDG::computeStripePatterns(0,v_tar,dummy,param_pp,V,F,D_cur,theta,frequency,numCoordinateFunctions,branchIndex,parameterization,zeroIndex,isBorder);
-    //     D_cur(i,1) += eps;
+    double eps = 1e-5;
+    for(int i=0; i<D_cur.rows(); ++i)
+    {
+        D_cur(i,1) += eps;
+        for(int j=0; j<3; ++j)
+            DDG::computeStripePatterns(0,v_tar,dummy,param_p,V,F,D_cur,theta,frequency,numCoordinateFunctions,branchIndex,parameterization,zeroIndex,isBorder);
+        D_cur(i,1) -= 2*eps;
+        for(int j=0; j<3; ++j)
+            DDG::computeStripePatterns(0,v_tar,dummy,param_pp,V,F,D_cur,theta,frequency,numCoordinateFunctions,branchIndex,parameterization,zeroIndex,isBorder);
+        D_cur(i,1) += eps;
 
-    //     // std::cout<<param_cur.transpose()<<std::endl;
-    //     // std::cout<<param_p.transpose()<<std::endl;
+        // std::cout<<param_cur.transpose()<<std::endl;
+        // std::cout<<param_p.transpose()<<std::endl;
 
-    //     for(int j=0; j<param_cur.rows(); ++j){
-    //         double dpdDN = (param_p(j)-param_pp(j))/(2*eps);
-    //         if(abs(dpdDN) > 1e-7)
-    //             std::cout<<i<<" "<<j<<" "<<dpdDN<<" "<<dpdD[i](j,1)<<" "<<(dpdDN-dpdD[i](j,1))/dpdDN<<std::endl;
-    //     }   
+        for(int j=0; j<param_cur.rows(); ++j){
+            double dpdDN = (param_p(j)-param_pp(j))/(2*eps);
+            if(abs(dpdDN) > 1e-7)
+                std::cout<<i<<" "<<j<<" "<<dpdDN<<" "<<dpdD[i](j,1)<<" "<<(dpdDN-dpdD[i](j,1))/dpdDN<<std::endl;
+        }   
         
-    // }
+    }
 
     // DDG::computeStripePatterns(1,v_tar,dpdD,param_cur,V,F,D_cur,theta,frequency,numCoordinateFunctions,branchIndex,parameterization,zeroIndex,isBorder);
     // DDG::computeStripePatterns(0,v_tar,dummy,param_tar,V,F,D_tar,theta,frequency,numCoordinateFunctions,branchIndex,parameterization,zeroIndex,isBorder);
@@ -140,13 +140,13 @@ int main(void) {
 
     // std::cout<<D_cur<<std::endl;
 
-    const static Eigen::IOFormat CSVFormat(Eigen::FullPrecision, Eigen::DontAlignCols, ", ", "\n");
-    std::ofstream file("../data/square200.csv");
-    if (file.is_open())
-    {
-        file << D_cur.format(CSVFormat);
-        file.close();
-    }
+//     const static Eigen::IOFormat CSVFormat(Eigen::FullPrecision, Eigen::DontAlignCols, ", ", "\n");
+//     std::ofstream file("../data/square200.csv");
+//     if (file.is_open())
+//     {
+//         file << D_cur.format(CSVFormat);
+//         file.close();
+//     }
 
     // std::ofstream file1("../data/square10_tar.csv");
     // if (file1.is_open())
