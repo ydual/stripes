@@ -47,6 +47,65 @@ namespace DDG
       return fmodPI( Omega );
    }
 
+   double fmodPIDiff2(double theta, double& derivative)
+   {
+      //theta - (2.*M_PI) * std::floor( (theta+M_PI) / (2.*M_PI) );
+
+      double x = (theta+M_PI) / (2.*M_PI);
+      double dxdtheta = 1./(2.*M_PI);
+
+      double phi = 0.00000001;
+
+      double y1 = (2.*x-1)/4.;
+      double y2 = (x)/2.;
+      
+      double m1 = (1.-phi)*sin(2.*M_PI*y1);
+      double dm1dy1 = (1.-phi)*2.*M_PI*cos(2.*M_PI*y1);
+      double T1 = 1.-(2.*acos(m1))/M_PI;
+      double dT1dm1 = 2./(M_PI*sqrt(1.-m1*m1));
+      
+      double m2 = sin(2.*M_PI*y2)/phi;
+      double dm2dy2  = 2.*M_PI*cos(2.*M_PI*y2);
+      double T2 = 2.*(atan(m2))/M_PI;
+      double dT2dm2 = 2./(M_PI*(1+m2*m2));
+
+      double T3 = (1.+T1*T2)/2.;
+      double dT3dx = 1./4.0*(T2*dT1dm1*dm1dy1+T1*dT2dm2*dm2dy2);
+
+      double n =  x-T3;
+      double dndx = 1.-dT3dx;
+      
+      derivative = 1.-(2.*M_PI)*dndx*dxdtheta;
+      return theta-(2.*M_PI)*n;
+   }
+
+   double lroundDiff2(double x, double& derivative)
+   {
+
+      double phi = 0.00000001;
+
+      double y1 = (2.*(x-0.5)-1)/4.;
+      double y2 = (x-0.5)/2.;
+      
+      double m1 = (1.-phi)*sin(2.*M_PI*y1);
+      double dm1dy1 = (1.-phi)*2.*M_PI*cos(2.*M_PI*y1);
+      double T1 = 1-(2.*acos((1.-phi)*sin(2.*M_PI*y1)))/M_PI;
+      double dT1dm1 = 2./(M_PI*sqrt(1.-m1*m1));
+      
+      double m2 = sin(2.*M_PI*y2)/phi;
+      double dm2dy2  = 2.*M_PI*cos(2.*M_PI*y2);
+      double T2 = 2.*(atan(sin(2.*M_PI*y2)/phi))/M_PI;
+      double dT2dm2 = 2./(M_PI*(1.+m2*m2));
+
+      double T3 = (1.+T1*T2)/2.;
+      double dT3dx = 1./4.*(T2*dT1dm1*dm1dy1+T1*dT2dm2*dm2dy2);
+
+      double n =  x-T3+0.5;
+      derivative = 1-dT3dx;
+      
+      return n;
+   }
+
    double Face :: fieldIndex( double k ) const
    {
       if( isBoundary() ) return 0.;
@@ -72,6 +131,7 @@ namespace DDG
       idx -= k * fmodPI(Omega);
 
       return lround( idx / (2.*M_PI) );
+      //return 0;
    }
 
    // double Face :: paramIndex( void ) const

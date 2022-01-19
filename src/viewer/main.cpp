@@ -13,13 +13,13 @@ int main( int argc, char** argv )
    Viewer viewer;
 
 #ifdef SP_COMPILE_COMMAND_LINE
-   if( argc != 2 )
+   if( argc != 3 )
    {
       cerr << "usage: " << argv[0] << " input.obj" << endl;
       return 1;
    }
 
-   viewer.mesh.read( argv[1] );
+   viewer.mesh.read( argv[1], argv[2]);
 #endif
 
    viewer.init();

@@ -44,6 +44,12 @@
 
 #include <vector>
 #include <string>
+#include <igl/readOBJ.h>
+#include <igl/writeOBJ.h>
+#include <igl/upsample.h>
+#include <igl/barycentric_coordinates.h>
+#include <igl/false_barycentric_subdivision.h>
+#include <igl/loop.h>
 
 #include "HalfEdge.h"
 #include "Vertex.h"
@@ -52,6 +58,13 @@
 #include "DenseMatrix.h"
 #include "SparseMatrix.h"
 #include "Complex.h"
+#include <eigen3/Eigen/Dense>
+#include <Spectra/GenEigsSolver.h>
+#include <Spectra/SymGEigsShiftSolver.h>
+#include <Spectra/MatOp/SparseGenMatProd.h>
+#include <Eigen/SparseCholesky>
+
+#define WRITE_TEXTURE_COOR True
 
 namespace DDG
 {
@@ -67,7 +80,7 @@ namespace DDG
          const Mesh& operator=( const Mesh& mesh );
          // copies mesh
 
-         int read( const std::string& filename );
+         int read( const std::string& filename, const std::string& filename2 );
          // reads a mesh from a Wavefront OBJ file; return value is nonzero
          // only if there was an error
 
@@ -102,6 +115,13 @@ namespace DDG
          void parameterize( void );
          void buildEnergy( SparseMatrix<Real>& A, int coordinate );
          void buildDirichletEnergy( SparseMatrix<Real>& A );
+         void energyGradient(SparseMatrix<Real>& A);
+         void checkenergyGradient(int coordinate);
+         void parameterizatioGradient(SparseMatrix<Real>& A, Eigen::MatrixXd& groundState, double l, Eigen::SparseMatrix<double>& H);
+         double computeSmallestEigenValueMe(SparseMatrix<Real>& A, Eigen::MatrixXd& groundState, int index);
+         void generateConformalMesh();
+         double SampleTexturePointDerivative(int num, int triangle, Eigen::Vector2d& bary);
+         void assignTextureCoordinatesDerivative(int coordinate);
 
          double energy( const SparseMatrix<Real>& A,
                         const DenseMatrix<Real>& x,
@@ -116,8 +136,18 @@ namespace DDG
          // an orthogonal coordinate (n=2), so that we
          // can construct a 2D parameterization
 
+         bool target;
+         Eigen::VectorXd v_tar;
+         Eigen::VectorXd textureCoor;
+         Eigen::VectorXd gs;
+         Eigen::VectorXd ns;
+         Eigen::MatrixXd dtexturedthetas;
+         std::vector<Eigen::MatrixXd> dcolorsdx;
+         Eigen::VectorXd colors;
+
       protected:
          std::string inputFilename;
+         std::string inputFilename2;
 
          void indexElements( void );
          void initializeSmoothStructure( void );

@@ -13,6 +13,8 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 include(UseColors)
 include(Warnings)
 
+include_directories("usr/include/eigen3")
+
 ################################################################################
 
 # Stripe library
@@ -62,7 +64,7 @@ add_library(stripes::stripes ALIAS stripes)
 target_include_directories(stripes PUBLIC src/)
 target_compile_features(stripes PUBLIC cxx_std_17)
 target_compile_definitions(stripes PUBLIC SP_COMPILE_COMMAND_LINE)
-target_link_libraries(stripes PRIVATE warnings::all)
+target_link_libraries(stripes PRIVATE warnings::all igl::core)
 
 set_target_properties(stripes PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
@@ -78,7 +80,7 @@ target_compile_definitions(stripes PUBLIC "-DDATA_FOLDER=\"${DATA_FOLDER}\"")
 
 # Dependencies
 if(TARGET SuiteSparse::cholmod)
-	target_link_libraries(stripes PUBLIC SuiteSparse::cholmod)
+	target_link_libraries(stripes PUBLIC SuiteSparse::cholmod igl::core)
 else()
 	if(DEFINED ENV{CONDA_PREFIX})
 		set(ENV{SUITESPARSE_ROOT} $ENV{CONDA_PREFIX})
@@ -86,13 +88,13 @@ else()
 	find_package(SuiteSparse REQUIRED)
 	find_package(Umfpack REQUIRED)
 	target_include_directories(stripes PUBLIC ${CHOLMOD_INCLUDE_DIR})
-	target_link_libraries(stripes PUBLIC ${CHOLMOD_LIBRARY})
+	target_link_libraries(stripes PUBLIC ${CHOLMOD_LIBRARY} igl::core)
 endif()
 
 if(STRIPES_TOPLEVEL_PROJECT)
 	# Dummy executable for debugging
 	add_executable(dummy src/main.cpp)
-	target_link_libraries(dummy PUBLIC stripes::stripes)
+	target_link_libraries(dummy PUBLIC stripes::stripes igl::core)
 endif()
 
 ################################################################################
@@ -101,8 +103,8 @@ find_package(Eigen3 QUIET NO_MODULE)
 if(TARGET Eigen3::Eigen)
 	# Libigl-style wrapper using Eigen types
 	add_library(stripes_wrapper
-		src/stripes/wrapper/Stripes.cpp
-		src/stripes/wrapper/Stripes.h
+		src/wrapper/Stripes.cpp
+		src/wrapper/Stripes.h
 	)
 	add_library(stripes::wrapper ALIAS stripes_wrapper)
 
@@ -123,6 +125,7 @@ if(STRIPES_TOPLEVEL_PROJECT)
 
 	find_package(OpenGL)
 	find_package(GLUT)
+	find_package(LIBIGL REQUIRED)
 	if(NOT (OPENGL_GLU_FOUND AND GLUT_FOUND))
 		message(WARNING "OpenGL or GLUT could not be found. The viewer will not be built.")
 		return()
@@ -139,13 +142,25 @@ if(STRIPES_TOPLEVEL_PROJECT)
 		src/viewer/Viewer.h
 	)
 
+	add_executable(Test
+		src/wrapper/main.cpp
+		src/wrapper/Stripes.cpp
+		src/wrapper/Stripes.h
+	)
+
 	# Dependencies
 	add_subdirectory(ext/glad)
+	add_subdirectory(ext/spectra)
 	target_link_libraries(StripePatterns
 		PUBLIC
 			stripes::stripes
 			GLUT::GLUT
 			glad::glad
 			OpenGL::GLU
+	)
+	target_link_libraries(Test
+		PUBLIC
+			stripes::stripes
+			igl::core
 	)
 endif()

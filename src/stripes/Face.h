@@ -38,6 +38,8 @@ namespace DDG
          double fieldIndex( double fieldDegree ) const;
          // returns the degree of the direction field around this triangle
 
+         double fieldIndexDerivative( double k, double& derivative);
+
          int index = 0;
          // unique ID in range [0,nF-1]
 
@@ -60,6 +62,7 @@ namespace DDG
          void getLocalSheet( std::vector<Complex>& psi, std::vector<double>& omega );
          // returns three parameter values psi and transport coefficients
          // consistent with the canonical sheet at f->he->vertex
+
    };
 }
 
